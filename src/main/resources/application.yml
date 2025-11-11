@@ -21,6 +21,11 @@ spring:
         secure: false          # HTTPS에서만 전송
         same-site: lax         # CSRF 공격 방지
 
+# 세션 정리 스케줄러 설정
+session:
+  cleanup:
+    fixed-delay-ms: 300000     # 만료 세션 정리 주기 (5분, 밀리초)
+
 logging:
   level:
     org.hibernate.SQL: debug
