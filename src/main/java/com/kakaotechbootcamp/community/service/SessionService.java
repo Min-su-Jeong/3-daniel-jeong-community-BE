@@ -8,6 +8,7 @@ import com.kakaotechbootcamp.community.entity.User;
 import com.kakaotechbootcamp.community.exception.BadRequestException;
 import com.kakaotechbootcamp.community.exception.NotFoundException;
 import com.kakaotechbootcamp.community.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -33,10 +34,11 @@ public class SessionService {
     /**
      * 로그인
      * - 의도: 이메일/비밀번호 검증 후 세션 생성
+     * - 보안: 기존 세션 무효화 후 새 세션 생성 (세션 탈취 방지)
      * - 에러: 사용자 없음 404, 비밀번호 불일치 400
      */
     @Transactional
-    public ApiResponse<UserLoginResponseDto> login(UserLoginRequestDto request, HttpSession session) {
+    public ApiResponse<UserLoginResponseDto> login(UserLoginRequestDto request, HttpServletRequest httpRequest) {
         String email = request.getEmail().trim().toLowerCase();
         String password = request.getPassword();
 
@@ -48,9 +50,16 @@ public class SessionService {
             throw new BadRequestException(Constants.ErrorMessage.INVALID_EMAIL_OR_PASSWORD);
         }
 
-        // 세션에 사용자 정보 저장
-        session.setAttribute(SESSION_USER_ID, user.getId());
-        session.setAttribute(SESSION_USER_EMAIL, user.getEmail());
+        // 기존 세션 무효화 (세션 탈취 방지)
+        HttpSession existingSession = httpRequest.getSession(false);
+        if (existingSession != null) {
+            existingSession.invalidate();
+        }
+
+        // 새 세션 생성 및 사용자 정보 저장
+        HttpSession newSession = httpRequest.getSession(true);
+        newSession.setAttribute(SESSION_USER_ID, user.getId());
+        newSession.setAttribute(SESSION_USER_EMAIL, user.getEmail());
 
         return ApiResponse.modified(UserLoginResponseDto.from(user));
     }

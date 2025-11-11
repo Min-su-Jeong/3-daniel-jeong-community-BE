@@ -4,6 +4,7 @@ import com.kakaotechbootcamp.community.common.ApiResponse;
 import com.kakaotechbootcamp.community.dto.user.UserLoginRequestDto;
 import com.kakaotechbootcamp.community.dto.user.UserLoginResponseDto;
 import com.kakaotechbootcamp.community.service.SessionService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,14 +25,15 @@ public class AuthController {
     /**
      * 로그인
      * - 의도: 이메일/비밀번호 검증 후 세션 생성
+     * - 보안: 기존 세션 무효화 후 새 세션 생성 (세션 탈취 방지)
      * - 반환: 200 OK (로그인 성공), 400 Bad Request (비밀번호 불일치), 404 Not Found (사용자 없음)
      */
     @PostMapping
     public ResponseEntity<ApiResponse<UserLoginResponseDto>> login(
             @Valid @RequestBody UserLoginRequestDto request,
-            HttpSession session
+            HttpServletRequest httpRequest
     ) {
-        ApiResponse<UserLoginResponseDto> apiResponse = sessionService.login(request, session);
+        ApiResponse<UserLoginResponseDto> apiResponse = sessionService.login(request, httpRequest);
         return ResponseEntity.status(apiResponse.getStatus()).body(apiResponse);
     }
 
