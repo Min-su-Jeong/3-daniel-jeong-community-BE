@@ -1,5 +1,6 @@
 package com.kakaotechbootcamp.community.service;
 
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.entity.Post;
 import com.kakaotechbootcamp.community.entity.PostLike;
 import com.kakaotechbootcamp.community.entity.PostStat;
@@ -35,7 +36,7 @@ public class PostLikeService {
     @Transactional
     public int saveLike(Integer userId, Integer postId) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
 
         boolean exists = postLikeRepository.existsByIdPostIdAndIdUserId(postId, userId);
         PostStat stat = postStatRepository.findById(postId).orElseGet(() -> new PostStat(post));
@@ -57,7 +58,7 @@ public class PostLikeService {
     @Transactional
     public int removeLike(Integer userId, Integer postId) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
 
         boolean exists = postLikeRepository.existsByIdPostIdAndIdUserId(postId, userId);
         PostStat stat = postStatRepository.findById(postId).orElseGet(() -> new PostStat(post));

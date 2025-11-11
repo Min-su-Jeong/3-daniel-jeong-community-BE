@@ -2,6 +2,7 @@ package com.kakaotechbootcamp.community.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.service.SessionService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -34,8 +35,8 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
      * - 회원가입 전 중복 체크 API
      */
     private static final List<String> PUBLIC_PATHS = Arrays.asList(
-            "/users/check-email",
-            "/users/check-nickname"
+            Constants.ApiPath.USERS_CHECK_EMAIL,
+            Constants.ApiPath.USERS_CHECK_NICKNAME
     );
 
     /**
@@ -44,7 +45,7 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
      */
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
-        return "OPTIONS".equals(request.getMethod());
+        return Constants.HttpMethod.OPTIONS.equals(request.getMethod());
     }
 
     /**
@@ -73,8 +74,8 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         // 세션이 없거나 인증되지 않은 경우 401 응답
         if (!sessionService.isAuthenticated(session)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.setContentType("application/json;charset=UTF-8");
-            ApiResponse<String> errorResponse = ApiResponse.unauthorized("로그인이 필요합니다");
+            response.setContentType(Constants.ContentType.APPLICATION_JSON_UTF8);
+            ApiResponse<String> errorResponse = ApiResponse.unauthorized(Constants.ErrorMessage.LOGIN_REQUIRED);
             response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
             response.getWriter().flush();
             return;
@@ -90,7 +91,7 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
      */
     private boolean isPublicPath(String path, String method) {
         // 정적 리소스 경로는 제외
-        if (path.startsWith("/files/") || path.equals("/files")) {
+        if (path.startsWith(Constants.ApiPath.FILES_PREFIX) || path.equals(Constants.ApiPath.FILES)) {
             return true;
         }
 
@@ -100,22 +101,22 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         }
 
         // POST /users: 회원가입
-        if ("POST".equals(method) && path.equals("/users")) {
+        if (Constants.HttpMethod.POST.equals(method) && path.equals(Constants.ApiPath.USERS)) {
             return true;
         }
 
         // GET /users/{id}: 회원 정보 조회
-        if ("GET".equals(method) && path.matches("/users/\\d+")) {
+        if (Constants.HttpMethod.GET.equals(method) && path.matches(Constants.ApiPath.USERS + "/\\d+")) {
             return true;
         }
 
         // POST /auth: 로그인
-        if ("POST".equals(method) && path.equals("/auth")) {
+        if (Constants.HttpMethod.POST.equals(method) && path.equals(Constants.ApiPath.AUTH)) {
             return true;
         }
 
         // DELETE /auth: 로그아웃 (만료된 토큰이어도 로그아웃은 가능할 수 있도록 설정)
-        if ("DELETE".equals(method) && path.equals("/auth")) {
+        if (Constants.HttpMethod.DELETE.equals(method) && path.equals(Constants.ApiPath.AUTH)) {
             return true;
         }
 

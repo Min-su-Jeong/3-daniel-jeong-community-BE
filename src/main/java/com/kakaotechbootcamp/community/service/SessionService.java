@@ -1,6 +1,7 @@
 package com.kakaotechbootcamp.community.service;
 
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.dto.user.UserLoginRequestDto;
 import com.kakaotechbootcamp.community.dto.user.UserLoginResponseDto;
 import com.kakaotechbootcamp.community.entity.User;
@@ -23,8 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class SessionService {
 
     // 세션에 저장할 사용자 정보 키 이름
-    private static final String SESSION_USER_ID = "userId";
-    private static final String SESSION_USER_EMAIL = "userEmail";
+    private static final String SESSION_USER_ID = Constants.SessionKey.USER_ID;
+    private static final String SESSION_USER_EMAIL = Constants.SessionKey.USER_EMAIL;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -40,11 +41,11 @@ public class SessionService {
         String password = request.getPassword();
 
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new NotFoundException("이메일 또는 비밀번호가 올바르지 않습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.INVALID_EMAIL_OR_PASSWORD));
 
         // 비밀번호 BCrypt 검증
         if (!passwordEncoder.matches(password, user.getPassword())) {
-            throw new BadRequestException("이메일 또는 비밀번호가 올바르지 않습니다");
+            throw new BadRequestException(Constants.ErrorMessage.INVALID_EMAIL_OR_PASSWORD);
         }
 
         // 세션에 사용자 정보 저장
@@ -97,7 +98,7 @@ public class SessionService {
     public User getCurrentUser(HttpSession session) {
         Integer userId = getCurrentUserId(session);
         if (userId == null) {
-            throw new NotFoundException("로그인이 필요합니다");
+            throw new NotFoundException(Constants.ErrorMessage.LOGIN_REQUIRED);
         }
         // @SQLRestriction으로 인해 삭제된 사용자는 조회되지 않음
         User user = userRepository.findById(userId)
@@ -108,7 +109,7 @@ public class SessionService {
             if (session != null) {
                 session.invalidate();
             }
-            throw new NotFoundException("사용자를 찾을 수 없습니다");
+            throw new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND);
         }
         
         return user;

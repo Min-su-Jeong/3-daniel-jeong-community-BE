@@ -1,6 +1,7 @@
 package com.kakaotechbootcamp.community.service;
 
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.dto.comment.*;
 import com.kakaotechbootcamp.community.entity.Comment;
 import com.kakaotechbootcamp.community.entity.Post;
@@ -42,14 +43,14 @@ public class CommentService {
      */
     public ApiResponse<Page<CommentResponseDto>> listByPost(Integer postId, Integer page, Integer size) {
         if (postId == null || postId <= 0) {
-            throw new BadRequestException("유효한 게시글 ID가 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.VALID_POST_ID_REQUIRED);
         }
         if (!postRepository.existsById(postId)) {
-            throw new NotFoundException("게시글을 찾을 수 없습니다");
+            throw new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND);
         }
-        int p = (page == null) ? 0 : Math.max(0, page);
-        int requested = (size == null || size <= 0) ? 10 : size;
-        int pageSize = Math.min(requested, 20);
+        int p = (page == null) ? Constants.Pagination.DEFAULT_PAGE : Math.max(0, page);
+        int requested = (size == null || size <= 0) ? Constants.Pagination.DEFAULT_SIZE : size;
+        int pageSize = Math.min(requested, Constants.Pagination.MAX_SIZE);
 
         var sorts = new java.util.ArrayList<Sort.Order>();
         sorts.add(Sort.Order.asc("createdAt"));
@@ -69,28 +70,28 @@ public class CommentService {
     @Transactional
     public ApiResponse<CommentResponseDto> create(Integer postId, Integer userId, CommentRequestDto request) {
         if (postId == null || postId <= 0 || userId == null || userId <= 0) {
-            throw new BadRequestException("유효한 ID가 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.VALID_ID_REQUIRED);
         }
-        Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
-        User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("사용자를 찾을 수 없습니다"));
+        Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
+        User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND));
 
         if (request == null || request.getContent() == null || request.getContent().isBlank()) {
-            throw new BadRequestException("댓글 내용을 입력해주세요");
+            throw new BadRequestException(Constants.ErrorMessage.COMMENT_CONTENT_REQUIRED);
         }
 
         Integer parentId = null;
         int depth = 0;
         if (request.getParentId() != null) {
             Comment parent = commentRepository.findById(request.getParentId())
-                    .orElseThrow(() -> new NotFoundException("부모 댓글을 찾을 수 없습니다"));
+                    .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.PARENT_COMMENT_NOT_FOUND));
             if (!parent.getPost().getId().equals(postId)) {
-                throw new BadRequestException("부모 댓글이 해당 게시글에 속하지 않습니다");
+                throw new BadRequestException(Constants.ErrorMessage.PARENT_COMMENT_NOT_IN_POST);
             }
             if (parent.getDeletedAt() != null) {
-                throw new BadRequestException("삭제된 댓글에는 답글을 달 수 없습니다");
+                throw new BadRequestException(Constants.ErrorMessage.DELETED_COMMENT_NO_REPLY);
             }
-            if (parent.getDepth() >= 1) { // 최대 깊이: 2
-                throw new BadRequestException("대댓글의 하위에는 더 이상 답글을 달 수 없습니다");
+            if (parent.getDepth() >= Constants.Comment.MAX_DEPTH) { // 최대 깊이: 2
+                throw new BadRequestException(Constants.ErrorMessage.MAX_DEPTH_EXCEEDED);
             }
             parentId = parent.getId();
             depth = parent.getDepth() + 1;
@@ -112,13 +113,13 @@ public class CommentService {
     @Transactional
     public ApiResponse<CommentResponseDto> update(Integer commentId, String content) {
         if (commentId == null || commentId <= 0) {
-            throw new BadRequestException("유효한 댓글 ID가 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.VALID_COMMENT_ID_REQUIRED);
         }
         if (content == null || content.isBlank()) {
-            throw new BadRequestException("댓글 내용을 입력해주세요");
+            throw new BadRequestException(Constants.ErrorMessage.COMMENT_CONTENT_REQUIRED);
         }
         Comment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new NotFoundException("댓글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.COMMENT_NOT_FOUND));
         comment.updateContent(content.trim());
         Comment saved = commentRepository.save(comment);
         return ApiResponse.modified(CommentResponseDto.from(saved));
@@ -131,12 +132,12 @@ public class CommentService {
     @Transactional
     public ApiResponse<Void> delete(Integer commentId) {
         if (commentId == null || commentId <= 0) {
-            throw new BadRequestException("유효한 댓글 ID가 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.VALID_COMMENT_ID_REQUIRED);
         }
         Comment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new NotFoundException("댓글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.COMMENT_NOT_FOUND));
         Integer postId = comment.getPost().getId();
-        comment.updateContent("삭제된 댓글입니다");
+        comment.updateContent(Constants.ErrorMessage.DELETED_COMMENT);
         comment.softDelete();
         // 비동기 댓글수 -1
         postStatAsyncService.decrementCommentCount(postId);

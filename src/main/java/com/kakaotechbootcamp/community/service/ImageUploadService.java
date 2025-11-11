@@ -1,5 +1,6 @@
 package com.kakaotechbootcamp.community.service;
 
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.common.ImageType;
 import com.kakaotechbootcamp.community.dto.image.ImageUploadResponseDto;
 import com.kakaotechbootcamp.community.exception.NotFoundException;
@@ -58,7 +59,7 @@ public class ImageUploadService {
         } else {
             // objectKey가 없는 경우: filename으로 경로 자동 생성
             if (filename == null || filename.isBlank()) {
-                throw new BadRequestException("objectKey 또는 filename 중 하나는 필수입니다");
+                throw new BadRequestException(Constants.ErrorMessage.OBJECT_KEY_OR_FILENAME_REQUIRED);
             }
             // 확장자 검증
             validateExtension(filename);
@@ -93,7 +94,7 @@ public class ImageUploadService {
             }
             return String.format(format, resourceId, safeFilename);
         }
-        throw new BadRequestException("지원하지 않는 이미지 타입입니다");
+        throw new BadRequestException(Constants.ErrorMessage.IMAGE_TYPE_NOT_SUPPORTED);
     }
 
     /**
@@ -110,18 +111,18 @@ public class ImageUploadService {
             expectedPrefix = String.format("user/%d/profile/", resourceId);
             if (!objectKey.startsWith(expectedPrefix)) {
                 throw new BadRequestException(
-                        String.format("프로필 이미지 objectKey는 '%s'로 시작해야 합니다", expectedPrefix)
+                        String.format(Constants.ErrorMessage.PROFILE_IMAGE_PREFIX_MISMATCH, expectedPrefix)
                 );
             }
         } else if (imageType == ImageType.POST) {
             expectedPrefix = String.format("post/%d/images/", resourceId);
             if (!objectKey.startsWith(expectedPrefix)) {
                 throw new BadRequestException(
-                        String.format("게시글 이미지 objectKey는 '%s'로 시작해야 합니다", expectedPrefix)
+                        String.format(Constants.ErrorMessage.POST_IMAGE_PREFIX_MISMATCH, expectedPrefix)
                 );
             }
         } else {
-            throw new BadRequestException("지원하지 않는 이미지 타입입니다");
+            throw new BadRequestException(Constants.ErrorMessage.IMAGE_TYPE_NOT_SUPPORTED);
         }
     }
 
@@ -166,7 +167,7 @@ public class ImageUploadService {
      */
     private void validateExtension(String nameOrPath) {
         if (nameOrPath == null || nameOrPath.isBlank()) {
-            throw new BadRequestException("파일명이 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.FILENAME_REQUIRED);
         }
         // 마지막 세그먼트 추출
         String filename = nameOrPath;
@@ -176,11 +177,11 @@ public class ImageUploadService {
         }
         int dot = filename.lastIndexOf('.');
         if (dot < 0 || dot + 1 >= filename.length()) {
-            throw new BadRequestException("이미지 확장자가 필요합니다 (.jpeg/.jpg/.png/.gif/.webp)");
+            throw new BadRequestException(Constants.ErrorMessage.IMAGE_EXTENSION_REQUIRED);
         }
         String ext = filename.substring(dot + 1).toLowerCase();
         if (!imageProperties.getAllowedExtensionSet().contains(ext)) {
-            throw new BadRequestException("지원하지 않는 이미지 확장자입니다: " + ext);
+            throw new BadRequestException(Constants.ErrorMessage.IMAGE_EXTENSION_NOT_SUPPORTED + ext);
         }
     }
 
@@ -195,17 +196,17 @@ public class ImageUploadService {
     private void validateResourceExists(ImageType imageType, Integer resourceId) {
         if (imageType == ImageType.PROFILE) {
             if (resourceId == null) {
-                throw new BadRequestException("프로필 이미지 검증 시 userId는 필수입니다");
+                throw new BadRequestException(Constants.ErrorMessage.PROFILE_IMAGE_USER_ID_REQUIRED);
             }
             if (!userRepository.existsById(resourceId)) {
-                throw new NotFoundException("사용자를 찾을 수 없습니다");
+                throw new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND);
             }
         } else if (imageType == ImageType.POST) {
             if (resourceId == null) {
-                throw new BadRequestException("게시글 이미지 검증 시 postId는 필수입니다");
+                throw new BadRequestException(Constants.ErrorMessage.POST_IMAGE_POST_ID_REQUIRED);
             }
             if (!postRepository.existsById(resourceId)) {
-                throw new NotFoundException("게시글을 찾을 수 없습니다");
+                throw new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND);
             }
         }
     }
@@ -219,7 +220,7 @@ public class ImageUploadService {
     private String generateImageUrl(String objectKey) {
         // 로컬 정적 매핑: StaticResourceConfig에서 /files/** → uploads/** 매핑
         // TODO(s3): S3로 전환 시 presigned URL 생성기로 교체
-        return "/files/" + objectKey;
+        return Constants.ApiPath.FILES_PREFIX + objectKey;
     }
 
     /**
@@ -235,7 +236,7 @@ public class ImageUploadService {
 
         String originalName = file.getOriginalFilename();
         if (originalName == null || originalName.isBlank()) {
-            throw new BadRequestException("파일명이 필요합니다");
+            throw new BadRequestException(Constants.ErrorMessage.FILENAME_REQUIRED);
         }
         // 확장자 검증
         validateExtension(originalName);
@@ -279,12 +280,12 @@ public class ImageUploadService {
             Path baseDir = Paths.get((configured == null || configured.isBlank()) ? "uploads" : configured).toAbsolutePath().normalize();
             Path target = baseDir.resolve(objectKey).toAbsolutePath().normalize();
             if (!target.startsWith(baseDir)) {
-                throw new BadRequestException("잘못된 파일 경로입니다");
+                throw new BadRequestException(Constants.ErrorMessage.INVALID_FILE_PATH);
             }
             Files.createDirectories(target.getParent());
             file.transferTo(target.toFile());
         } catch (IOException e) {
-            throw new BadRequestException("이미지 저장 중 오류가 발생했습니다");
+            throw new BadRequestException(Constants.ErrorMessage.IMAGE_SAVE_ERROR);
         }
     }
 }

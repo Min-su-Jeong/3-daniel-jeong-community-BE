@@ -1,6 +1,7 @@
 package com.kakaotechbootcamp.community.service;
 
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.common.ImageType;
 import com.kakaotechbootcamp.community.common.ImageProperties;
 import com.kakaotechbootcamp.community.dto.post.*;
@@ -75,7 +76,7 @@ public class PostService {
     @Transactional
     public ApiResponse<PostDetailDto> getDetail(Integer postId) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
 
         List<PostImage> images = postImageRepository.findByPostIdOrderByDisplayOrderAsc(postId);
         PostStat stat = postStatRepository.findById(postId).orElseGet(() -> new PostStat(post));
@@ -101,7 +102,7 @@ public class PostService {
     @Transactional
     public ApiResponse<PostDetailDto> create(PostCreateRequestDto request) {
         User author = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new NotFoundException("작성자를 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.AUTHOR_NOT_FOUND));
 
         Post post = new Post(author, request.getTitle().trim(), request.getContent().trim());
         Post saved = postRepository.save(post);
@@ -142,7 +143,7 @@ public class PostService {
     @Transactional
     public ApiResponse<PostDetailDto> update(Integer postId, PostUpdateRequestDto request) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
 
         if (request.getTitle() != null && !request.getTitle().trim().isEmpty()) {
             post.updateTitle(request.getTitle().trim());
@@ -190,7 +191,7 @@ public class PostService {
     @Transactional
     public ApiResponse<Void> delete(Integer postId) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
         post.softDelete();
         return ApiResponse.deleted(null);
     }

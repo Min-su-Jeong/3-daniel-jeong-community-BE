@@ -1,6 +1,7 @@
 package com.kakaotechbootcamp.community.service;
 
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.dto.post.PostStatResponseDto;
 import com.kakaotechbootcamp.community.entity.Post;
 import com.kakaotechbootcamp.community.entity.PostStat;
@@ -44,7 +45,7 @@ public class PostStatService {
     @Transactional
     public ApiResponse<PostStatResponseDto> syncAll(Integer postId) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.POST_NOT_FOUND));
 
         PostStat stat = postStatRepository.findById(postId).orElseGet(() -> new PostStat(post));
 

@@ -1,6 +1,7 @@
 package com.kakaotechbootcamp.community.service;
 
 import com.kakaotechbootcamp.community.common.ApiResponse;
+import com.kakaotechbootcamp.community.common.Constants;
 import com.kakaotechbootcamp.community.common.ImageType;
 import com.kakaotechbootcamp.community.dto.user.UserCreateRequestDto;
 import com.kakaotechbootcamp.community.dto.user.UserResponseDto;
@@ -38,10 +39,10 @@ public class UserService {
         String nickname = request.getNickname().trim();
 
         if (userRepository.existsByEmail(email)) {
-            throw new ConflictException("이미 사용 중인 이메일입니다");
+            throw new ConflictException(Constants.ErrorMessage.EMAIL_ALREADY_IN_USE);
         }
         if (userRepository.existsByNickname(nickname)) {
-            throw new ConflictException("이미 사용 중인 닉네임입니다");
+            throw new ConflictException(Constants.ErrorMessage.NICKNAME_ALREADY_IN_USE);
         }
         // 비밀번호 BCrypt 암호화
         String encodedPassword = passwordEncoder.encode(request.getPassword());
@@ -58,7 +59,7 @@ public class UserService {
     @Transactional(readOnly = true)
     public ApiResponse<UserResponseDto> getById(Integer id) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("사용자를 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND));
         return ApiResponse.modified(UserResponseDto.from(user));
     }
 
@@ -71,12 +72,12 @@ public class UserService {
     @Transactional
     public ApiResponse<UserResponseDto> update(Integer id, UserUpdateRequestDto request) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("사용자를 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND));
 
         if (request.getNickname() != null && !request.getNickname().isBlank()) {
             String newNickname = request.getNickname().trim();
             if (!newNickname.equals(user.getNickname()) && userRepository.existsByNicknameAndIdNot(newNickname, id)) {
-                throw new ConflictException("이미 사용 중인 닉네임입니다");
+                throw new ConflictException(Constants.ErrorMessage.NICKNAME_ALREADY_IN_USE);
             }
             user.updateNickname(newNickname);
         }
@@ -101,7 +102,7 @@ public class UserService {
     @Transactional
     public ApiResponse<Void> delete(Integer id) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("사용자를 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND));
         user.softDelete();
         return ApiResponse.deleted(null);
     }
@@ -134,19 +135,19 @@ public class UserService {
     @Transactional
     public ApiResponse<Void> updatePassword(Integer id, String currentPassword, String newPassword) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("사용자를 찾을 수 없습니다"));
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorMessage.USER_NOT_FOUND));
 
         String cur = currentPassword == null ? "" : currentPassword.trim();
         String next = newPassword == null ? "" : newPassword.trim();
         if (cur.isEmpty() || next.isEmpty()) {
-            throw new BadRequestException("비밀번호를 모두 입력해주세요");
+            throw new BadRequestException(Constants.ErrorMessage.PASSWORD_ALL_REQUIRED);
         }
         if (cur.equals(next)) {
-            throw new BadRequestException("이전 비밀번호와 새 비밀번호가 동일합니다");
+            throw new BadRequestException(Constants.ErrorMessage.PASSWORD_SAME_AS_PREVIOUS);
         }
         // 현재 비밀번호 BCrypt 비교
         if (!passwordEncoder.matches(cur, user.getPassword())) {
-            throw new BadRequestException("현재 비밀번호가 일치하지 않습니다");
+            throw new BadRequestException(Constants.ErrorMessage.PASSWORD_MISMATCH);
         }
         // 새 비밀번호 BCrypt 암호화
         String encodedNewPassword = passwordEncoder.encode(next);
