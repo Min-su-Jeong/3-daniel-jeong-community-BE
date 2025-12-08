@@ -115,165 +115,220 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Check if Docker is installed
+      - name: Deploy to ASG
         run: |
+          set -e
           set +x
-          echo "::add-mask::${{ secrets.EC2_INSTANCE_ID }}"
-          echo "::add-mask::${{ secrets.AWS_REGION }}"
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["command -v docker >/dev/null && echo \"true\" || echo \"false\""]' \
-            --output text \
-            --query 'Command.CommandId')
-          echo "::add-mask::$COMMAND_ID"
+          REGION="${{ secrets.AWS_REGION }}"
+          ASG_NAME="community-backend-asg"
+          TARGET_GROUP_NAME="community-backend-tg"
+          LAUNCH_TEMPLATE_NAME="community-backend-lt"
+          ECR_REPO="community-backend"
           
-          echo "Waiting for command to complete..."
-          aws ssm wait command-executed \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --region ${{ secrets.AWS_REGION }} >/dev/null 2>&1
+          cleanup_on_error() {
+            if [ -n "$NEW_INSTANCE_ID" ] && [ "$NEW_INSTANCE_ID" != "" ]; then
+              aws autoscaling terminate-instance-in-auto-scaling-group \
+                --instance-id $NEW_INSTANCE_ID \
+                --should-decrement-desired-capacity \
+                --region $REGION 2>/dev/null || true
+            fi
+            if [ -n "$MAX_SIZE_INCREASED" ] && [ "$MAX_SIZE_INCREASED" = "true" ]; then
+              aws autoscaling update-auto-scaling-group \
+                --auto-scaling-group-name $ASG_NAME \
+                --max-size $ORIGINAL_MAX_SIZE \
+                --region $REGION 2>/dev/null || true
+            fi
+            if [ -n "$DESIRED_INCREASED" ] && [ "$DESIRED_INCREASED" = "true" ]; then
+              aws autoscaling update-auto-scaling-group \
+                --auto-scaling-group-name $ASG_NAME \
+                --desired-capacity $ORIGINAL_DESIRED \
+                --region $REGION 2>/dev/null || true
+            fi
+          }
+          trap cleanup_on_error ERR EXIT
           
-          DOCKER_EXISTS=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'StandardOutputContent' \
-            --output text | tr -d '\r\n')
-          
-          if [ "$DOCKER_EXISTS" != "true" ]; then
-            echo "Error: Docker is not installed on the EC2 instance"
+          if ! aws ecr describe-repositories --repository-names $ECR_REPO --region $REGION >/dev/null 2>&1; then
+            echo "Error: ECR repository $ECR_REPO not found"
             exit 1
           fi
           
-          echo "Docker is installed"
-
-      - name: Check if Docker Network Exists
-        run: |
-          set +x
-          echo "::add-mask::${{ secrets.EC2_INSTANCE_ID }}"
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["if ! sudo docker network inspect community-network >/dev/null 2>&1; then sudo docker network create community-network && echo \"Created docker network: community-network\"; else echo \"Docker network community-network already exists\"; fi"]' \
+          ECR_URI=$(aws ecr describe-repositories --repository-names $ECR_REPO --query 'repositories[0].repositoryUri' --output text --region $REGION)
+          if [ -z "$ECR_URI" ] || [ "$ECR_URI" = "None" ]; then
+            echo "Error: Failed to get ECR repository URI"
+            exit 1
+          fi
+          
+          IMAGE_EXISTS=$(aws ecr describe-images --repository-name $ECR_REPO --image-ids imageTag=latest --query 'imageDetails[0].imageTags[0]' --output text --region $REGION 2>/dev/null || echo "None")
+          if [ "$IMAGE_EXISTS" = "None" ]; then
+            LATEST_DIGEST=$(aws ecr describe-images --repository-name $ECR_REPO --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageDigest' --output text --region $REGION 2>/dev/null || echo "")
+            if [ -z "$LATEST_DIGEST" ]; then
+              echo "Error: No images found in ECR repository"
+              exit 1
+            fi
+            LATEST_IMAGE="${ECR_URI}@${LATEST_DIGEST}"
+          else
+            LATEST_IMAGE="${ECR_URI}:latest"
+          fi
+          
+          if ! aws ssm put-parameter --name "/community/ecr_backend_image" --value "$LATEST_IMAGE" --type "String" --overwrite --region $REGION >/dev/null 2>&1; then
+            echo "Error: Failed to update Parameter Store"
+            exit 1
+          fi
+          
+          if ! aws ec2 describe-launch-templates --launch-template-names $LAUNCH_TEMPLATE_NAME --region $REGION >/dev/null 2>&1; then
+            echo "Error: Launch template $LAUNCH_TEMPLATE_NAME not found"
+            exit 1
+          fi
+          
+          LATEST_VERSION=$(aws ec2 describe-launch-template-versions --launch-template-name $LAUNCH_TEMPLATE_NAME --versions '$Latest' --query 'LaunchTemplateVersions[0].VersionNumber' --output text --region $REGION 2>/dev/null || echo "")
+          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "None" ]; then
+            echo "Error: Failed to get latest launch template version"
+            exit 1
+          fi
+          if ! aws ec2 create-launch-template-version --launch-template-name $LAUNCH_TEMPLATE_NAME --source-version $LATEST_VERSION --region $REGION >/dev/null 2>&1; then
+            echo "Warning: Failed to create new launch template version"
+          fi
+          
+          if ! aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $ASG_NAME --region $REGION >/dev/null 2>&1; then
+            echo "Error: Auto Scaling Group $ASG_NAME not found"
+            exit 1
+          fi
+          
+          CURRENT_DESIRED=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names $ASG_NAME \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
             --output text \
-            --query 'Command.CommandId')
-          echo "::add-mask::$COMMAND_ID"
+            --region $REGION)
           
-          echo "Waiting for network setup to complete..."
-          aws ssm wait command-executed \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --region ${{ secrets.AWS_REGION }} >/dev/null 2>&1
+          if [ "$CURRENT_DESIRED" = "None" ] || [ -z "$CURRENT_DESIRED" ]; then
+            echo "Error: Failed to get current desired capacity"
+            exit 1
+          fi
           
-          OUTPUT=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'StandardOutputContent' \
-            --output text)
+          if [ "$CURRENT_DESIRED" = "0" ]; then
+            if ! aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --desired-capacity 1 --region $REGION >/dev/null 2>&1; then
+              echo "Error: Failed to start ASG instance"
+              exit 1
+            fi
+            exit 0
+          fi
           
-          echo "$OUTPUT" | sed 's/password[^[:space:]]*/[REDACTED]/gi' | sed 's/token[^[:space:]]*/[REDACTED]/gi' | sed 's/key[^[:space:]]*/[REDACTED]/gi' | sed 's/secret[^[:space:]]*/[REDACTED]/gi'
-
-      - name: Login to ECR on EC2
-        run: |
-          set +x
-          echo "::add-mask::${{ secrets.EC2_INSTANCE_ID }}"
-          echo "::add-mask::${{ secrets.AWS_REGION }}"
-          ECR_REGISTRY=$(aws ecr describe-repositories --repository-names community-backend --query 'repositories[0].repositoryUri' --output text --region ${{ secrets.AWS_REGION }} | sed 's|/.*||')
-          echo "::add-mask::$ECR_REGISTRY"
-          
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin $ECR_REGISTRY\"]" \
+          CURRENT_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names $ASG_NAME \
+            --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
             --output text \
-            --query 'Command.CommandId')
-          echo "::add-mask::$COMMAND_ID"
+            --region $REGION)
           
-          echo "Waiting for ECR login to complete..."
+          CURRENT_MAX=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names $ASG_NAME \
+            --query 'AutoScalingGroups[0].MaxSize' \
+            --output text \
+            --region $REGION)
+          
+          if [ "$CURRENT_MAX" = "None" ] || [ -z "$CURRENT_MAX" ]; then
+            echo "Error: Failed to get current max size"
+            exit 1
+          fi
+          
+          ORIGINAL_DESIRED=$CURRENT_DESIRED
+          ORIGINAL_MAX_SIZE=$CURRENT_MAX
+          NEW_DESIRED=$((CURRENT_DESIRED + 1))
+          MAX_SIZE_INCREASED="false"
+          DESIRED_INCREASED="false"
+          
+          if [ "$CURRENT_MAX" -lt "$NEW_DESIRED" ]; then
+            if ! aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --max-size $NEW_DESIRED --region $REGION >/dev/null 2>&1; then
+              echo "Error: Failed to increase max size"
+              exit 1
+            fi
+            MAX_SIZE_INCREASED="true"
+          fi
+          
+          if ! aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --desired-capacity $NEW_DESIRED --region $REGION >/dev/null 2>&1; then
+            echo "Error: Failed to increase desired capacity"
+            exit 1
+          fi
+          DESIRED_INCREASED="true"
+          
+          NEW_INSTANCE_ID=""
           for i in {1..30}; do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id $COMMAND_ID \
-              --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-              --query 'Status' \
-              --output text)
+            sleep 10
+            ALL_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names $ASG_NAME \
+              --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+              --output text \
+              --region $REGION)
             
-            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              break
-            fi
-            sleep 2
+            for INSTANCE_ID in $ALL_INSTANCES; do
+              if [[ ! " $CURRENT_INSTANCES " =~ " $INSTANCE_ID " ]]; then
+                NEW_INSTANCE_ID=$INSTANCE_ID
+                break 2
+              fi
+            done
           done
           
-          STATUS=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'Status' \
-            --output text)
-          
-          if [ "$STATUS" != "Success" ]; then
+          if [ -z "$NEW_INSTANCE_ID" ]; then
+            echo "Error: New instance creation failed or timeout"
             exit 1
           fi
           
-          echo "ECR login successful"
-
-      - name: Deploy to EC2 via Docker Compose
-        run: |
-          set +x
-          echo "::add-mask::${{ secrets.EC2_INSTANCE_ID }}"
-          echo "::add-mask::${{ secrets.AWS_REGION }}"
-          ECR_BACKEND_IMAGE=$(aws ssm get-parameter --name "/community/ecr_backend_image" --query 'Parameter.Value' --output text --region ${{ secrets.AWS_REGION }})
-          echo "::add-mask::$ECR_BACKEND_IMAGE"
+          if ! aws elbv2 describe-target-groups --names $TARGET_GROUP_NAME --region $REGION >/dev/null 2>&1; then
+            echo "Error: Target group $TARGET_GROUP_NAME not found"
+            exit 1
+          fi
           
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"cd /home/ubuntu/prod && export ECR_BACKEND_IMAGE=$ECR_BACKEND_IMAGE && sudo -E docker compose pull backend && sudo -E docker compose up -d --force-recreate backend\"]" \
+          TARGET_GROUP_ARN=$(aws elbv2 describe-target-groups \
+            --names $TARGET_GROUP_NAME \
+            --query 'TargetGroups[0].TargetGroupArn' \
             --output text \
-            --query 'Command.CommandId')
-          echo "::add-mask::$COMMAND_ID"
+            --region $REGION)
           
-          echo "Waiting for deployment to complete..."
-          for i in {1..60}; do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id $COMMAND_ID \
-              --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-              --query 'Status' \
-              --output text)
-            
-            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              break
-            fi
-            sleep 2
-          done
-          
-          OUTPUT=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'StandardOutputContent' \
-            --output text)
-          
-          ERROR=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'StandardErrorContent' \
-            --output text)
-          
-          STATUS=$(aws ssm get-command-invocation \
-            --command-id $COMMAND_ID \
-            --instance-id ${{ secrets.EC2_INSTANCE_ID }} \
-            --query 'Status' \
-            --output text)
-          
-          echo "=== Deployment Output ==="
-          echo "$OUTPUT" | sed 's/password[^[:space:]]*/[REDACTED]/gi' | sed 's/token[^[:space:]]*/[REDACTED]/gi' | sed 's/key[^[:space:]]*/[REDACTED]/gi' | sed 's/secret[^[:space:]]*/[REDACTED]/gi' | sed 's/Authorization[^[:space:]]*/[REDACTED]/gi' | sed 's|[0-9]\{12\}\.dkr\.ecr[^[:space:]]*|[REDACTED]|gi'
-          
-          if [ -n "$ERROR" ] && [ "$ERROR" != "None" ]; then
-            echo "=== Error Output ==="
-            echo "$ERROR" | sed 's/password[^[:space:]]*/[REDACTED]/gi' | sed 's/token[^[:space:]]*/[REDACTED]/gi' | sed 's/key[^[:space:]]*/[REDACTED]/gi' | sed 's/secret[^[:space:]]*/[REDACTED]/gi' | sed 's/Authorization[^[:space:]]*/[REDACTED]/gi' | sed 's|[0-9]\{12\}\.dkr\.ecr[^[:space:]]*|[REDACTED]|gi'
-          fi
-          
-          if [ "$STATUS" != "Success" ]; then
-            echo "Deployment failed with status: $STATUS"
+          if [ -z "$TARGET_GROUP_ARN" ] || [ "$TARGET_GROUP_ARN" = "None" ]; then
+            echo "Error: Failed to get target group ARN"
             exit 1
           fi
           
-          echo "Deployment completed successfully"
+          HEALTH_STATUS=""
+          for i in {1..30}; do
+            sleep 10
+            HEALTH_STATUS=$(aws elbv2 describe-target-health \
+              --target-group-arn $TARGET_GROUP_ARN \
+              --targets Id=$NEW_INSTANCE_ID \
+              --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+              --output text \
+              --region $REGION 2>/dev/null || echo "initial")
+            
+            if [ "$HEALTH_STATUS" = "healthy" ]; then
+              break
+            fi
+          done
+          
+          if [ "$HEALTH_STATUS" != "healthy" ]; then
+            echo "Error: Health check failed. Status: $HEALTH_STATUS"
+            exit 1
+          fi
+          
+          for OLD_INSTANCE_ID in $CURRENT_INSTANCES; do
+            if [ -n "$OLD_INSTANCE_ID" ] && [ "$OLD_INSTANCE_ID" != "None" ]; then
+              aws autoscaling terminate-instance-in-auto-scaling-group \
+                --instance-id $OLD_INSTANCE_ID \
+                --should-decrement-desired-capacity \
+                --region $REGION >/dev/null 2>&1 || true
+            fi
+          done
+          
+          if ! aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --desired-capacity $ORIGINAL_DESIRED --region $REGION >/dev/null 2>&1; then
+            echo "Error: Failed to restore desired capacity"
+            exit 1
+          fi
+          DESIRED_INCREASED="false"
+          
+          if [ "$MAX_SIZE_INCREASED" = "true" ]; then
+            if ! aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --max-size $ORIGINAL_MAX_SIZE --region $REGION >/dev/null 2>&1; then
+              echo "Error: Failed to restore max size"
+              exit 1
+            fi
+            MAX_SIZE_INCREASED="false"
+          fi
+          
+          trap - ERR EXIT
