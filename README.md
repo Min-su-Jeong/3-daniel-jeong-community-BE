@@ -16,7 +16,7 @@
 <br>
 
 ## 프로젝트 개요
-
+  
 ### 프로젝트 소개
 
 <strong>S.W.M (Swim Way Makers)</strong>는 수영에 관심있는 모든 사람들을 대상으로 필요한 정보와 서비스를 한 곳에서 제공하는 통합 플랫폼입니다.
@@ -26,6 +26,10 @@
 </p>
 
 ---
+
+### 홈페이지 링크
+
+[S.W.M (Swim Way Makers)](https://www.swimwaymakers.site/)
 
 ### 시연 영상
 
